@@ -9,7 +9,8 @@ class User(Base):
     name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
-    role = Column(String, nullable=False)  # "Admin" or "Staff"
+    # "Admin" or "Staff" in ROLE
+    role = Column(String, nullable=False) 
     phone = Column(String, nullable=False)
     city = Column(String, nullable=False)
     country = Column(String, nullable=False)

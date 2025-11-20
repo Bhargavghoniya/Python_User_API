@@ -1,5 +1,4 @@
 from typing import Optional, List
-
 from fastapi import FastAPI, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
@@ -15,28 +14,25 @@ from auth import (
     get_current_admin_user,
 )
 
-app = FastAPI(title="User Management API (Python Version)")
+app = FastAPI(title="User Management API")
 
-# create tables
+# Create tables when the application starts
 Base.metadata.create_all(bind=engine)
 
 
-# 1. Registration API
+# 1. User Registration
 @app.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
-    """
-    Registration API
-    Fields: Name, Email, Password, Role (Admin/Staff), Phone, City, Country
-    """
-    # check if email already exists
-    existing = db.query(User).filter(User.email == user_in.email).first()
-    if existing:
+    """Register a new user."""
+    # Check if email already exists
+    existing_user = db.query(User).filter(User.email == user_in.email).first()
+    if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Email already registered.",
         )
 
-    user = User(
+    new_user = User(
         name=user_in.name,
         email=user_in.email,
         password_hash=get_password_hash(user_in.password),
@@ -45,53 +41,47 @@ def register_user(user_in: UserCreate, db: Session = Depends(get_db)):
         city=user_in.city,
         country=user_in.country,
     )
-    db.add(user)
+
+    db.add(new_user)
     db.commit()
-    db.refresh(user)
-    return user
+    db.refresh(new_user)
+    return new_user
 
 
-# 2. Login API
+# 2. User Login
 @app.post("/login", response_model=Token)
 def login(credentials: UserLogin, db: Session = Depends(get_db)):
-    """
-    Login API
-    Fields: Email, Password
-    Returns: JWT access token
-    """
+    """Authenticate user and return JWT token."""
     user = authenticate_user(db, credentials.email, credentials.password)
+
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password.",
         )
 
-    access_token = create_access_token(
+    token = create_access_token(
         data={"sub": user.email, "user_id": user.id, "role": user.role}
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+
+    return {"access_token": token, "token_type": "bearer"}
 
 
-# 3. List Users API (Admin only, with search + filter)
+# 3. List Users (Admin Only)
 @app.get("/users", response_model=List[UserOut])
 def list_users(
-    q: Optional[str] = Query(None, description="Search by name or email"),
+    q: Optional[str] = Query(None, description="Search name/email"),
     country: Optional[str] = Query(None, description="Filter by country"),
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin_user),
 ):
-    """
-    List Users API
-    - Only Admin can access
-    - Search: by name OR email using 'q'
-    - Filter: by country using 'country'
-    """
+    """List all users with optional search and country filter."""
     query = db.query(User)
 
     if q:
-        like_pattern = f"%{q}%"
+        pattern = f"%{q}%"
         query = query.filter(
-            or_(User.name.ilike(like_pattern), User.email.ilike(like_pattern))
+            or_(User.name.ilike(pattern), User.email.ilike(pattern))
         )
 
     if country:
@@ -100,23 +90,19 @@ def list_users(
     return query.all()
 
 
-# 4. User Details API
+# 4. Get User Details
+
 @app.get("/users/{user_id}", response_model=UserOut)
 def get_user_details(
     user_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    
-
     """
-    User Details API
-    - Normal user: can see only his/her own details
-    - Admin: can see any user's details
+    Get user details:
+    - Admin: can view any user
+    - Staff: can view only their own profile
     """
-
-
-    
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
@@ -125,10 +111,11 @@ def get_user_details(
             detail="User not found.",
         )
 
+    # Only Admin OR the owner can access the details
     if current_user.role != "Admin" and current_user.id != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not allowed to see this user's details.",
+            detail="You are not allowed to access this user's information.",
         )
 
     return user
